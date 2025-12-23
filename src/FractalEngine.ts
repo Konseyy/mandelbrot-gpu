@@ -1,9 +1,9 @@
 import * as THREE from 'three/webgpu';
-import { positionLocal, Fn, uniform, vec4, vec3, vec2, float, Loop, Break, dot, If, select } from 'three/tsl';
+import { positionLocal, Fn, uniform, vec4, vec2, float, Loop, Break, dot, If, select, log2, bool } from 'three/tsl';
 import debounce from 'lodash/debounce';
 
 const MAX_ZOOM = 2.5;
-const MIN_ZOOM = 0.000005;
+const MIN_ZOOM = 0.0003;
 
 const COLOR_0 = new THREE.Vector3(0.0, 7.0, 100.0).divideScalar(255.0);
 const COLOR_1 = new THREE.Vector3(32.0, 107.0, 203.0).divideScalar(255.0);
@@ -59,6 +59,7 @@ export class FractalEngine {
     const material = new THREE.MeshBasicNodeMaterial();
 
     const maxIterations = float(100);
+    const b = float(256.0);
 
     // Color interpolation based on iteration count
     const rgbColorFromIteration = Fn(([iteration]: [ReturnType<typeof float>]) => {
@@ -86,6 +87,27 @@ export class FractalEngine {
       return color;
     });
 
+    const iterateMandelbrot = Fn(([z, uv]: [ReturnType<typeof vec2>, ReturnType<typeof vec2>]) => {
+      const n = float(0);
+      // Mandelbrot iteration loop: z = z² + c
+      Loop({ start: 0, end: this.uMaxIterations, type: 'int', condition: '<' }, () => {
+        z.assign(vec2(z.x.mul(z.x).sub(z.y.mul(z.y)), float(2.0).mul(z.x).mul(z.y)).add(uv));
+
+        If(dot(z, z).greaterThan(b.mul(b)), () => {
+          Break();
+        });
+        n.addAssign(1);
+      });
+
+      const inSet = bool(false);
+
+      If(n.greaterThanEqual(this.uMaxIterations.sub(1)), () => {
+        inSet.value = true;
+      });
+
+      return select(inSet, 0, n.sub(log2(log2(dot(z, z))).add(4.0)));
+    });
+
     const mandelBrot = Fn(() => {
       // Scale position by zoom and center on interesting region
       // Apply aspect ratio correction to x coordinate
@@ -93,27 +115,13 @@ export class FractalEngine {
       const scaled = pos.mul(this.uZoom).add(this.uStart);
 
       const z = vec2(0, 0);
-      const iteration = float(0);
 
-      // Mandelbrot iteration loop: z = z² + c
-      Loop({ start: 0, end: this.uMaxIterations, type: 'int', condition: '<' }, ({ i }) => {
-        iteration.assign(i);
-        If(dot(z, z).greaterThan(4.0), () => {
-          Break();
-        });
+      const iterations = iterateMandelbrot(z, scaled);
 
-        // z² = (x + yi)² = x² - y² + 2xyi
-        // Assign as a single vec2 to ensure both components use old values
-        z.assign(vec2(z.x.mul(z.x).sub(z.y.mul(z.y)).add(scaled.x), float(2.0).mul(z.x).mul(z.y).add(scaled.y)));
-      });
-
-      // Return black for points inside the set, colored for escaped points
-      const color = select(iteration.greaterThanEqual(this.uMaxIterations.sub(1)), vec3(0, 0, 0), rgbColorFromIteration(iteration));
-
-      return vec4(color, 1.0);
+      return vec4(rgbColorFromIteration(iterations), 1.0);
     });
 
-    material.colorNode = mandelBrot();
+    material.fragmentNode = mandelBrot();
 
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
     this.scene.add(mesh);
