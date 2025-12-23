@@ -132,6 +132,7 @@ export class FractalEngine {
       this.renderer.setSize(width, height);
       this.uAspect.value = width / height;
     }
+    this.renderer.setPixelRatio(window.devicePixelRatio);
   }
 
   private renderLoop() {
